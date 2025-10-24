@@ -4588,8 +4588,11 @@ public logevent_round_end()
 
 	if (is_ct_pending_respawn())
 	{
-		// 延遲 1 秒後再次檢查
-		set_task(1.0, "logevent_round_end", TASK_ROUND_END);
+		if (!g_roundend_pending)
+		{
+			g_roundend_pending = true;
+			set_task(1.0, "logevent_round_end", TASK_ROUND_END);
+		}
 		return;
 	}
 
