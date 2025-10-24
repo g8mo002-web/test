@@ -2033,6 +2033,12 @@ public csdm_player_spawn(id)
 ///////////////////////////////////////////////////////////////////
 public fw_PlayerKilled(victim, attacker, shouldgib)
 {
+	// 在 public fw_PlayerKilled(victim, attacker, shouldgib) 的第一行加入（越早越好）：
+	pev(victim, pev_origin, g_vec_last_origin[victim]);
+
+	// 可同時加一行 log 以便驗證是否成功存到座標：
+	log_amx("[ZH SavePos] fw_PlayerKilled: victim=%d saved_last_origin={%f,%f,%f}", victim,
+		   g_vec_last_origin[victim][0], g_vec_last_origin[victim][1], g_vec_last_origin[victim][2]);
 	if ((victim == attacker) || !is_user_connected(attacker))
 		return;
 
@@ -2106,22 +2112,37 @@ public fw_PlayerKilled(victim, attacker, shouldgib)
 	log_amx("[ZH Debug] victim=%d, ctsnum=%d, g_set_user_kill=%d, survivor_respawn=%d", victim, ctsnum, g_set_user_kill[victim], get_pcvar_num(cvar_survivor_respawn));
 
 	// 如果是 CT 且目前存活的人類數小於或等於 1（最後一人或無人），安排延遲重生 / 顯示 LAST MAN 訊息
+	// --- 修正：當沒有活著的 CT 時立即安排 emergency_respawn；若只有 1 人則顯示 LASTMAN 並延遲重生 ---
 	if (cs_get_user_team(victim) == CS_TEAM_CT && ctsnum <= 1 && !g_set_user_kill[victim])
 	{
 		if (!task_exists(victim + TASK_RESPAWN))
 		{
-			if (!g_only_one_survivor)
+			if (ctsnum == 0)
 			{
-				g_only_one_survivor = true;
+				// 真正沒有活著的 CT：標記並立即安排緊急重生，避免回合被結束
+				g_set_user_kill[victim] = true;
+				set_task(0.01, "emergency_respawn", victim);
 
-				static name[32];
-				get_user_name(victim, name, charsmax(name));
+				static name0[32];
+				get_user_name(victim, name0, charsmax(name0));
 				set_hudmessage(0, 255, 100, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1);
-				ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_LASTMAN", name);
+				ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_SURVIVOR_RESPAWN", name0);
 			}
+			else // ctsnum == 1
+			{
+				if (!g_only_one_survivor)
+				{
+					g_only_one_survivor = true;
 
-			// 安排 survivor 重生（延遲值由 cvar 控制）
-			set_task(get_pcvar_float(cvar_survivor_respawn_delay), "survivor_respawner", victim + TASK_RESPAWN);
+					static name1[32];
+					get_user_name(victim, name1, charsmax(name1));
+					set_hudmessage(0, 255, 100, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1);
+					ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_LASTMAN", name1);
+				}
+
+				// 若只是最後一人，使用 cvar 指定的延遲進行 survivor 重生
+				set_task(get_pcvar_float(cvar_survivor_respawn_delay), "survivor_respawner", victim + TASK_RESPAWN);
+			}
 		}
 		return;
 	}
