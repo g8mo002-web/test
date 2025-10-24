@@ -17,7 +17,7 @@
 #define PLUGIN_NAME	"ZombieHell"
 #define PLUGIN_VERSION	"2.0Z"
 #define PLUGIN_AUTHOR	"hectorz0r"
-
+#define TASK_ROUND_END 9999
 ///////////////////////////////////////////////////////////////////
 /// Custom Settings                                             ///
 ///////////////////////////////////////////////////////////////////
@@ -25,6 +25,7 @@
 //#define AMBIENCE_RAIN // Rain ##下雨
 //#define AMBIENCE_SNOW // Snow ##下雪
 #define AMBIENCE_FOG 	// Fog ##霧
+
 
 #if defined AMBIENCE_FOG // 霧的設定(於霧開啟時作用)
 new const FOG_DENSITY[] = "0.0003" // Density ##霧的密度
@@ -233,6 +234,7 @@ new const SOUND_TURN_NVG_OFF[] = { "items/nvg_off.wav" }		 //關閉夜視鏡時�
 new const SOUND_PICK_GRENADE[] = { "items/gunpickup2.wav" } 		 //取得投擲彈時的音效
 new const SOUND_PICK_AMMO[] = { "items/9mmclip1.wav" }			 //取得彈藥時的音效
 new const SOUND_PICK_ARMOR[] = { "items/ammopickup2.wav" }		 //取得護甲時的音效
+new bool:g_roundend_pending = false;
 
 ///////////////////////////////////////////////////////////////////
 /// Give Gun Sets                                               ///
@@ -1179,8 +1181,10 @@ public fw_TakeDamage(victim, inflictor, attacker, Float:damage, damage_type)
 public event_round_start()
 {
 	set_task(0.1, "remove_stuff")
+	remove_task(TASK_ROUND_END); // 清除殘留任務
 	for (new i = 1; i <= g_maxplayers; i++)
 	{
+		g_will_respawn_time[i] = 0.0;
 		remove_task(i)
 		remove_task(i+TASK_MODEL)
 		remove_task(i+TASK_RESPAWN)
@@ -4576,14 +4580,18 @@ public message_TextMsg()
 }
 
 // Log Event Round End
+
 public logevent_round_end()
 {
 	if (g_game_restart)
 		return;
 
-	// 檢查是否有 CT 正在排程重生
 	if (is_ct_pending_respawn())
+	{
+		// 延遲 1 秒後再次檢查
+		set_task(1.0, "logevent_round_end", TASK_ROUND_END);
 		return;
+	}
 
 	g_roundend = true;
 
@@ -4595,6 +4603,7 @@ public logevent_round_end()
 
 	static ts[32], ts_num, cts[32], cts_num;
 	get_alive_players(ts, ts_num, cts, cts_num);
+
 
 	if (ts_num > 0) // 回合結束時,只有殭屍的陣營有生還者
 	{
