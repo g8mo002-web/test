@@ -2330,6 +2330,15 @@ public fw_PlayerKilled(victim, attacker, shouldgib)
 	// 當殭屍王被人類殺死時會變成碎塊
 	if (g_boss[victim])
 		SetHamParamInteger(3, 2)
+	if (cs_get_user_team(victim) == CS_TEAM_CT && !is_user_alive(victim))
+	{
+		g_will_respawn_time[victim] = 1.0;
+		you_will_respawn_ch(victim);
+		set_task(1.0, "survivor_respawner", victim + TASK_RESPAWN);
+
+		server_print("[DEBUG] CT %d 死亡，排程 1 秒後重生", victim);
+	}
+
 }
 
 public fw_PlayerKilled_Post(victim, attacker, shouldgib)
@@ -2654,6 +2663,13 @@ public survivor_respawner(taskid)
 		fm_give_item(id, "weapon_usp")
 	}
 	set_task((get_pcvar_float(cvar_survivor_protect)), "remove_survivor_protection", id)
+	// ✅ 玩家復活後重新判斷回合是否應該結束
+	if (!g_roundend)
+	{
+		server_print("[DEBUG] 玩家 %d 重生完成，重新檢查回合結束", id);
+		check_round_end();
+	}
+
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -4637,6 +4653,11 @@ public check_round_end()
 }
 public logevent_round_end()
 {
+	set_task(0.1, "delayed_round_end");
+}
+
+public delayed_round_end()
+{
 	if (g_game_restart)
 		return;
 
@@ -4650,7 +4671,7 @@ public logevent_round_end()
 		return;
 	}
 
-	check_round_end(); // ✅ 直接交給 check_round_end 處理
+	check_round_end();
 }
 
 // 🔧 新增：判斷是否有 CT 正在排程重生
