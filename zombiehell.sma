@@ -2092,23 +2092,38 @@ public fw_PlayerKilled(victim, attacker, shouldgib)
 	get_alive_players(ts, ts_num, cts, cts_num)
 
 	// ✅ 判斷是否只剩一名人類，安排重生並使用 g_only_one_survivor 作為 HUD 控制
-	if (cs_get_user_team(victim) == CS_TEAM_CT && cts_num <= 1 && !g_set_user_kill[victim])
+	// --- 修正: 明確計算 CT 存活數，避免 cts_num/ctsnum 混用導致只有 1 人不重生 的問題 ---
+	new ctsnum = 0;
+	for (new i = 1; i <= g_maxplayers; i++)
+	{
+		if (!is_user_connected(i)) continue;
+		if (!is_user_alive(i)) continue;
+		if (cs_get_user_team(i) != CS_TEAM_CT) continue;
+		ctsnum++;
+	}
+
+	// 除錯日誌（測試完可移除）
+	log_amx("[ZH Debug] victim=%d, ctsnum=%d, g_set_user_kill=%d, survivor_respawn=%d", victim, ctsnum, g_set_user_kill[victim], get_pcvar_num(cvar_survivor_respawn));
+
+	// 如果是 CT 且目前存活的人類數小於或等於 1（最後一人或無人），安排延遲重生 / 顯示 LAST MAN 訊息
+	if (cs_get_user_team(victim) == CS_TEAM_CT && ctsnum <= 1 && !g_set_user_kill[victim])
 	{
 		if (!task_exists(victim + TASK_RESPAWN))
 		{
 			if (!g_only_one_survivor)
 			{
-				g_only_one_survivor = true
+				g_only_one_survivor = true;
 
-				static name[32]
-				get_user_name(victim, name, charsmax(name))
-				set_hudmessage(0, 255, 100, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1)
-				ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_LASTMAN", name)
+				static name[32];
+				get_user_name(victim, name, charsmax(name));
+				set_hudmessage(0, 255, 100, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1);
+				ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_LASTMAN", name);
 			}
 
-			set_task(get_pcvar_float(cvar_survivor_respawn_delay), "survivor_respawner", victim + TASK_RESPAWN)
+			// 安排 survivor 重生（延遲值由 cvar 控制）
+			set_task(get_pcvar_float(cvar_survivor_respawn_delay), "survivor_respawner", victim + TASK_RESPAWN);
 		}
-		return
+		return;
 	}
 
 	if (ts_num == 1)
