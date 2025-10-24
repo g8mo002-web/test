@@ -2113,34 +2113,30 @@ public fw_PlayerKilled(victim, attacker, shouldgib)
 
 	// 如果是 CT 且目前存活的人類數小於或等於 1（最後一人或無人），安排延遲重生 / 顯示 LAST MAN 訊息
 	// --- 修正：當沒有活著的 CT 時立即安排 emergency_respawn；若只有 1 人則顯示 LASTMAN 並延遲重生 ---
+	// 找到此分支 (大約在第 ~2116 行)： if (cs_get_user_team(victim) == CS_TEAM_CT && ctsnum <= 1 && !g_set_user_kill[victim]) { ... }
 	if (cs_get_user_team(victim) == CS_TEAM_CT && ctsnum <= 1 && !g_set_user_kill[victim])
 	{
 		if (!task_exists(victim + TASK_RESPAWN))
 		{
 			if (ctsnum == 0)
 			{
-				// 真正沒有活著的 CT：標記並立即安排緊急重生，避免回合被結束
-				g_set_user_kill[victim] = true;
-				set_task(0.01, "emergency_respawn", victim);
-
-				static name0[32];
-				get_user_name(victim, name0, charsmax(name0));
-				set_hudmessage(0, 255, 100, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1);
-				ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_SURVIVOR_RESPAWN", name0);
+				// 已是 0 人，立刻安排 emergency_respawn（你原本有這行）
+				g_set_user_kill[victim] = true
+				set_task(0.01, "emergency_respawn", victim)
+				...
 			}
 			else // ctsnum == 1
 			{
 				if (!g_only_one_survivor)
 				{
 					g_only_one_survivor = true;
-
 					static name1[32];
 					get_user_name(victim, name1, charsmax(name1));
-					set_hudmessage(0, 255, 100, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1);
-					ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_LASTMAN", name1);
+					...
 				}
 
-				// 若只是最後一人，使用 cvar 指定的延遲進行 survivor 重生
+				// --- 新增：在安排延遲 survivor 重生前，先把旗標設 true ---
+				g_set_user_kill[victim] = true;
 				set_task(get_pcvar_float(cvar_survivor_respawn_delay), "survivor_respawner", victim + TASK_RESPAWN);
 			}
 		}
@@ -2389,31 +2385,29 @@ public fw_PlayerKilled_Post(victim, attacker, shouldgib)
     }
 
     // ✅ 修正：即使只有一名CT也能安排重生，不依賴延遲判斷
-    if (cs_get_user_team(victim) == CS_TEAM_CT && !g_set_user_kill[victim])
-    {
-        new survivor_max_respawns = get_pcvar_num(cvar_survivor_respawns)
-        if (!survivor_max_respawns || g_survivor_respawn_count[victim] < survivor_max_respawns)
-        {
-            if (!task_exists(victim + TASK_RESPAWN))
-            {
-                g_only_one_survivor = true
+	// if (cs_get_user_team(victim) == CS_TEAM_CT && !g_set_user_kill[victim]) { ... }
+	if (cs_get_user_team(victim) == CS_TEAM_CT && !g_set_user_kill[victim])
+	{
+		new survivor_max_respawns = get_pcvar_num(cvar_survivor_respawns)
+		if (!survivor_max_respawns || g_survivor_respawn_count[victim] < survivor_max_respawns)
+		{
+			if (!task_exists(victim + TASK_RESPAWN))
+			{
+				// --- 新增：在安排延遲重生前先標記為「要重生」，
+				//     以防回合結束判斷把回合直接結束掉 ---
+				g_set_user_kill[victim] = true;
 
-                static name[32]
-                get_user_name(victim, name, charsmax(name))
-                set_hudmessage(0, 255, 100, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1)
-                ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_SURVIVOR_RESPAWN", name)
+				g_only_one_survivor = true
 
-                g_will_respawn_time[victim] = get_pcvar_float(cvar_survivor_respawn_delay)
-                set_task(1.0, "you_will_respawn_ch", victim)
-                set_task(g_will_respawn_time[victim], "survivor_respawner", victim + TASK_RESPAWN)
-            }
-        }
-        else
-        {
-            // 重生次數用完，顯示失敗訊息
-            set_hudmessage(255, 50, 50, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1)
-            ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_SURVIVOR_DEAD")
-        }
+				static name[32]
+				get_user_name(victim, name, charsmax(name))
+				set_hudmessage(0, 255, 100, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1)
+				...
+				set_task(get_pcvar_float(cvar_survivor_respawn_delay), "survivor_respawner", victim + TASK_RESPAWN)
+			}
+		}
+		return;
+	}
     }
 }
 
