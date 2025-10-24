@@ -605,7 +605,7 @@ public plugin_init()
 	cvar_survivor_buyzone = register_cvar("zh_survivor_buyzone", "1")	//開啟人類購買區域限制(只能在購買區購買裝備)[1=開啟/0=關閉]
 	cvar_survivor_respawn = register_cvar("zh_survivor_respawn", "1")	//開啟人類重生[1=開啟/0=關閉]
 	cvar_survivor_respawn_delay = register_cvar("zh_survivor_respawn_delay", "15.0") //人類重生間隔時間(單位:秒)
-	cvar_survivor_respawns = register_cvar("zh_survivor_respawns", "0")	//人類的重生次數(預設0為不限制次數)
+	cvar_survivor_respawns = register_cvar("zh_survivor_respawns", "30")	//人類的重生次數(預設0為不限制次數)
 	cvar_survivor_protect = register_cvar("zh_survivor_protect", "5.0")	//開啟人類重生防護[0.0=無防護 預設5.0=5秒]
 	cvar_render_ctr = register_cvar("zh_render_ctr", "255")			//人類重生防護顏色(R)
 	cvar_render_ctg = register_cvar("zh_render_ctg", "255")			//人類重生防護顏色(G)
@@ -845,7 +845,7 @@ create_config_file(const FilePatch[])
 	fputs(FileHandle, "zh_maxmoney 99999              //人類金錢上限(需配合金錢上限破解使用)^n")
 	fputs(FileHandle, "zh_survivor_respawn 1          //開啟人類重生[1=開啟/0=關閉]^n")
 	fputs(FileHandle, "zh_survivor_respawn_delay 1.0 //人類重生間隔時間(單位:秒)^n")
-	fputs(FileHandle, "zh_survivor_respawns 0         //人類的重生次數(設定成0代表不限制次數)^n")
+	fputs(FileHandle, "zh_survivor_respawns 30         //人類的重生次數(設定成0代表不限制次數)^n")
 	fputs(FileHandle, "zh_survivor_protect 5.0        //開啟人類重生防護(X.0 = X秒)[0.0=無防護]^n")
 	fputs(FileHandle, "zh_render_ctr 255              //人類重生防護顏色(R)^n")
 	fputs(FileHandle, "zh_render_ctg 255              //人類重生防護顏色(G)^n")
@@ -2033,12 +2033,7 @@ public csdm_player_spawn(id)
 ///////////////////////////////////////////////////////////////////
 public fw_PlayerKilled(victim, attacker, shouldgib)
 {
-	// 在 public fw_PlayerKilled(victim, attacker, shouldgib) 的第一行加入（越早越好）：
-	pev(victim, pev_origin, g_vec_last_origin[victim]);
-
-	// 可同時加一行 log 以便驗證是否成功存到座標：
-	log_amx("[ZH SavePos] fw_PlayerKilled: victim=%d saved_last_origin={%f,%f,%f}", victim,
-		   g_vec_last_origin[victim][0], g_vec_last_origin[victim][1], g_vec_last_origin[victim][2]);
+	// Killed by Non-Player Object or Self Killed
 	if ((victim == attacker) || !is_user_connected(attacker))
 		return;
 
@@ -2049,7 +2044,6 @@ public fw_PlayerKilled(victim, attacker, shouldgib)
 
 	g_user_kill[victim] = 0
 	new CsTeams:team2 = cs_get_user_team(attacker)
-
 	if ((victim != attacker) && (cs_get_user_team(victim) != cs_get_user_team(attacker)))
 	{
 		if (team2 == CS_TEAM_T)
@@ -2059,17 +2053,26 @@ public fw_PlayerKilled(victim, attacker, shouldgib)
 			get_user_name(victim, name2, charsmax(name2))
 			health = get_user_health(attacker)
 			zombieheal = get_pcvar_num(cvar_zombieheal)
-			fm_set_user_health(attacker, health + zombieheal)
+			fm_set_user_health(attacker, health+zombieheal)
 			set_hudmessage(100, 255, 0, -1.0, 0.27, 0, 6.0, 6.0, 0.1, 0.2, -1)
 			ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZOMBIEHEAL", name, name2, zombieheal)
 			PlaySound(0, SOUND_EAT_BRAIN)
 		}
-		else if (team2 == CS_TEAM_CT && cs_get_user_team(victim) == CS_TEAM_T && !g_boss[victim])
+		else
 		{
-			new money = cs_get_user_money(attacker)
-			new maxmoney = get_pcvar_num(cvar_maxmoney)
-			new zombiebonus = get_pcvar_num(cvar_zombiekill_bonus) * g_level
-			cs_set_user_money(attacker, min(money + zombiebonus, maxmoney - 300))
+			if ((team2 == CS_TEAM_CT) && ((cs_get_user_team(victim) == CS_TEAM_T) && !g_boss[victim]))
+			{
+				new money  = cs_get_user_money(attacker), maxmoney = get_pcvar_num(cvar_maxmoney)
+				new zombiebonus = ((get_pcvar_num(cvar_zombiekill_bonus))*g_level)
+				if ((money+zombiebonus) <= maxmoney)
+				{
+					cs_set_user_money(attacker, money+zombiebonus)
+				}
+				else
+				{
+					cs_set_user_money(attacker, maxmoney-300)
+				}
+			}
 		}
 
 		g_user_kill[attacker]++
@@ -2077,91 +2080,203 @@ public fw_PlayerKilled(victim, attacker, shouldgib)
 		{
 			new name3[33]
 			get_user_name(attacker, name3, charsmax(name3))
-			set_hudmessage(team2 == CS_TEAM_T ? 100 : 0, 255, team2 == CS_TEAM_T ? 0 : 100, -1.0, 0.27, 0, 6.0, 6.0, 0.1, 0.2, -1)
+			if (team2 == CS_TEAM_T)
+				set_hudmessage(100, 255, 0, -1.0, 0.27, 0, 6.0, 6.0, 0.1, 0.2, -1)
+			else if (team2 == CS_TEAM_CT)
+				set_hudmessage(0, 255, 100, -1.0, 0.27, 0, 6.0, 6.0, 0.1, 0.2, -1)
 
 			switch (g_user_kill[attacker])
 			{
-				case 5: ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, team2 == CS_TEAM_T ? "ZH_ZSCORE1" : "ZH_HSCORE1", name3)
-				case 10: ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, team2 == CS_TEAM_T ? "ZH_ZSCORE2" : "ZH_HSCORE2", name3)
-				case 20: ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, team2 == CS_TEAM_T ? "ZH_ZSCORE3" : "ZH_HSCORE3", name3)
-				case 30: ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, team2 == CS_TEAM_T ? "ZH_ZSCORE4" : "ZH_HSCORE4", name3)
-				case 40: ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, team2 == CS_TEAM_T ? "ZH_ZSCORE5" : "ZH_HSCORE5", name3)
-				case 50: ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, team2 == CS_TEAM_T ? "ZH_ZSCORE6" : "ZH_HSCORE6", name3)
-				case 60: ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, team2 == CS_TEAM_T ? "ZH_ZSCORE7" : "ZH_HSCORE7", name3)
-				case 75: ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, team2 == CS_TEAM_T ? "ZH_ZSCORE8" : "ZH_HSCORE8", name3)
-				case 100: ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, team2 == CS_TEAM_T ? "ZH_ZSCORE9" : "ZH_HSCORE9", name3)
+				case 5:
+				{
+					switch (team2)
+					{
+						case CS_TEAM_T:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZSCORE1", name3)
+						}
+						case CS_TEAM_CT:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HSCORE1", name3)
+						}
+					}
+				}
+				case 10:
+				{
+					switch (team2)
+					{
+						case CS_TEAM_T:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZSCORE2", name3)
+						}
+						case CS_TEAM_CT:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HSCORE2", name3)
+						}
+					}
+				}
+				case 20:
+				{
+					switch (team2)
+					{
+						case CS_TEAM_T:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZSCORE3", name3)
+						}
+						case CS_TEAM_CT:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HSCORE3", name3)
+						}
+					}
+				}
+				case 30:
+				{
+					switch (team2)
+					{
+						case CS_TEAM_T:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZSCORE4", name3)
+						}
+						case CS_TEAM_CT:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HSCORE4", name3)
+						}
+					}
+				}
+				case 40:
+				{
+					switch (team2)
+					{
+						case CS_TEAM_T:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZSCORE5", name3)
+						}
+						case CS_TEAM_CT:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HSCORE5", name3)
+						}
+					}
+				}
+				case 50:
+				{
+					switch (team2)
+					{
+						case CS_TEAM_T:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZSCORE6", name3)
+						}
+						case CS_TEAM_CT:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HSCORE6", name3)
+						}
+					}
+				}
+				case 60:
+				{
+					switch (team2)
+					{
+						case CS_TEAM_T:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZSCORE7", name3)
+						}
+						case CS_TEAM_CT:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HSCORE7", name3)
+						}
+					}
+				}
+				case 75:
+				{
+					switch (team2)
+					{
+						case CS_TEAM_T:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZSCORE8", name3)
+						}
+						case CS_TEAM_CT:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HSCORE8", name3)
+						}
+					}
+				}
+				case 100:
+				{
+					switch (team2)
+					{
+						case CS_TEAM_T:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZSCORE9", name3)
+						}
+						case CS_TEAM_CT:
+						{
+							ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HSCORE9", name3)
+						}
+					}
+				}
 			}
 		}
 	}
 
+	// 檢查是否只剩下最後一個人類還存活著.(還能重生的或是正在重生的,都算是存活著)
 	static ts[32], ts_num, cts[32], cts_num
 	get_alive_players(ts, ts_num, cts, cts_num)
-
-	// ✅ 判斷是否只剩一名人類，安排重生並使用 g_only_one_survivor 作為 HUD 控制
-	// --- 修正: 明確計算 CT 存活數，避免 cts_num/ctsnum 混用導致只有 1 人不重生 的問題 ---
-	new ctsnum = 0;
-	for (new i = 1; i <= g_maxplayers; i++)
+	if (cs_get_user_team(victim) == CS_TEAM_CT && cts_num == 1 && !g_set_user_kill[victim])
 	{
-		if (!is_user_connected(i)) continue;
-		if (!is_user_alive(i)) continue;
-		if (cs_get_user_team(i) != CS_TEAM_CT) continue;
-		ctsnum++;
-	}
-
-	// 除錯日誌（測試完可移除）
-	log_amx("[ZH Debug] victim=%d, ctsnum=%d, g_set_user_kill=%d, survivor_respawn=%d", victim, ctsnum, g_set_user_kill[victim], get_pcvar_num(cvar_survivor_respawn));
-
-	// 如果是 CT 且目前存活的人類數小於或等於 1（最後一人或無人），安排延遲重生 / 顯示 LAST MAN 訊息
-	// --- 修正：當沒有活著的 CT 時立即安排 emergency_respawn；若只有 1 人則顯示 LASTMAN 並延遲重生 ---
-	// 找到此分支 (大約在第 ~2116 行)： if (cs_get_user_team(victim) == CS_TEAM_CT && ctsnum <= 1 && !g_set_user_kill[victim]) { ... }
-	if (cs_get_user_team(victim) == CS_TEAM_CT && ctsnum <= 1 && !g_set_user_kill[victim])
-	{
-		if (!task_exists(victim + TASK_RESPAWN))
+		if (!g_only_one_survivor)
 		{
-			if (ctsnum == 0)
+			static i, last_survivor_id, name[32]
+			last_survivor_id = cts[0]
+			g_only_one_survivor = true
+			for (i = 1; i <= g_maxplayers; i++)
 			{
-				// 已是 0 人，立刻安排 emergency_respawn（你原本有這行）
-				g_set_user_kill[victim] = true
-				set_task(0.01, "emergency_respawn", victim)
-				...
-			}
-			else // ctsnum == 1
-			{
-				if (!g_only_one_survivor)
-				{
-					g_only_one_survivor = true;
-					static name1[32];
-					get_user_name(victim, name1, charsmax(name1));
-					...
-				}
+				if (!is_user_connected(i) || i == last_survivor_id || cs_get_user_team(i) != CS_TEAM_CT)
+					continue;
 
-				// --- 新增：在安排延遲 survivor 重生前，先把旗標設 true ---
-				g_set_user_kill[victim] = true;
-				set_task(get_pcvar_float(cvar_survivor_respawn_delay), "survivor_respawner", victim + TASK_RESPAWN);
+				if (g_survivor_respawn_count[i] > 0 || task_exists(i+TASK_RESPAWN))
+				{
+					g_only_one_survivor = false
+					break;
+				}
+			}
+
+			if (g_only_one_survivor)
+			{
+				get_user_name(last_survivor_id, name, charsmax(name))
+				set_hudmessage(0, 255, 100, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1)
+				ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_LASTMAN", name)
 			}
 		}
-		return;
 	}
-
+	
+	// 當剩下最後一隻殭屍時,設定讓他變成殭屍王.
 	if (ts_num == 1)
 	{
 		static last_zombie_id
 		last_zombie_id = ts[0]
-		if (!g_boss[last_zombie_id])
+		if (!g_boss[last_zombie_id]) // 檢查是否已經是成為殭屍王了
 		{
 			g_survivor_class[last_zombie_id] = 0
 			g_boss[last_zombie_id] = true
 			set_boss_model(last_zombie_id)
 			StopSound(0)
 			play_boss_ambience_sound()
-			fm_set_user_health(last_zombie_id, get_user_health(last_zombie_id) + g_boss_health)
-			cs_set_user_armor(last_zombie_id, get_pcvar_num(cvar_zombiearmor) * g_level * 2, CS_ARMOR_VESTHELM)
-			g_user_maxspeed[last_zombie_id] = get_pcvar_num(cvar_zombie_random) == 1 ? g_boss_maxspeed + float(g_level * 5) : g_boss_maxspeed
+			fm_set_user_health(last_zombie_id, get_user_health(last_zombie_id)+g_boss_health)
+			cs_set_user_armor(last_zombie_id, ((get_pcvar_num(cvar_zombiearmor)*g_level)*2), CS_ARMOR_VESTHELM)
+			if(get_pcvar_num(cvar_zombie_random) == 1)
+			{
+				g_user_maxspeed[last_zombie_id] = g_boss_maxspeed+float(g_level*5)
+			}
+			else
+			{
+				if(get_pcvar_num(cvar_zombie_random) == 0)
+				{
+					g_user_maxspeed[last_zombie_id] = g_boss_maxspeed
+				}
+			}
 			pev(last_zombie_id, pev_health, g_playerMaxHealth[last_zombie_id])
 			set_pev(last_zombie_id, pev_gravity, 0.7)
 			set_pev(last_zombie_id, pev_maxspeed, g_user_maxspeed[last_zombie_id])
 			set_task(1.0, "boss_beacon_effect", last_zombie_id)
-
 			static tname[32]
 			get_user_name(last_zombie_id, tname, charsmax(tname))
 			set_hudmessage(255, 50, 50, -1.0, 0.21, 0, 6.0, 5.0, 0.1, 0.2, -1)
@@ -2169,6 +2284,7 @@ public fw_PlayerKilled(victim, attacker, shouldgib)
 		}
 	}
 
+	// 當殭屍死亡後,會出現特殊效果.
 	if (cs_get_user_team(victim) == CS_TEAM_T && get_pcvar_num(cvar_zombie_effect))
 	{
 		static Float:FOrigin2[3]
@@ -2184,19 +2300,21 @@ public fw_PlayerKilled(victim, attacker, shouldgib)
 		message_end()
 	}
 
-	if (cs_get_user_team(attacker) == CS_TEAM_CT && g_boss[victim])
+	// 殺死殭屍王的玩家可以獲得額外獎勵
+	if ((cs_get_user_team(attacker) == CS_TEAM_CT) && g_boss[victim])
 	{
 		static ctname[32]
 		get_user_name(attacker, ctname, charsmax(ctname))
-
-		new money = cs_get_user_money(attacker)
-		new maxmoney = get_pcvar_num(cvar_maxmoney)
-		new bossbonus = get_pcvar_num(cvar_bosskill_bonus) * g_level
-
-		if ((money + bossbonus) <= maxmoney)
-			cs_set_user_money(attacker, money + bossbonus)
+		new money  = cs_get_user_money(attacker), maxmoney = get_pcvar_num(cvar_maxmoney)
+		new bossbonus = ((get_pcvar_num(cvar_bosskill_bonus))*g_level)
+		if ((money+bossbonus) <= maxmoney)
+		{
+			cs_set_user_money(attacker, money+bossbonus)
+		}
 		else
-			cs_set_user_money(attacker, maxmoney - 300)
+		{
+			cs_set_user_money(attacker, maxmoney-300)
+		}
 
 		if (g_level < 10)
 		{
@@ -2205,274 +2323,159 @@ public fw_PlayerKilled(victim, attacker, shouldgib)
 		}
 	}
 
-	// 殭屍王死亡時碎塊效果
+	// 當殭屍王被人類殺死時會變成碎塊
 	if (g_boss[victim])
 		SetHamParamInteger(3, 2)
+}
 
-	// ✅ 最後一名人類死亡時，立即安排緊急重生（防止回合結束）
+public fw_PlayerKilled_Post(victim, attacker, shouldgib)
+{
+	fm_set_rendering(victim)
+	if (!g_boss[victim])
+	{
+		set_pev(victim, pev_effects, pev(victim, pev_effects) | EF_NODRAW)
+	}
+
+	remove_task(victim)
+	remove_task(victim+TASK_MODEL)
+	remove_task(victim+TASK_TEAM)
+	remove_task(victim+TASK_RESPAWN)
+	remove_task(victim+TASK_BURN)
+	remove_task(victim+TASK_UNFROZEN)
+	remove_task(victim+TASK_NVG)
+	remove_task(victim+TASK_SPEC_NVG)
+
+	g_frozen[victim] = false
+	g_burning[victim] = false
+	toggle_user_nvg(victim, 0)
+	g_nvg_enabled[victim] = false
+
+	if (g_give_nvg[victim])
+	{
+		cs_set_user_nvg(victim, 0)
+		g_give_nvg[victim] = false
+	}
+
+	set_task(0.1, "spectator_nvg", victim+TASK_SPEC_NVG)
+
+	if ((cs_get_user_team(victim) == CS_TEAM_T) && !is_user_bot(victim))
+	{
+		g_zombie_respawn_count[victim] = 0
+		g_survivor_respawn_count[victim] = 0
+		cs_set_user_team(victim, CS_TEAM_CT)
+	}
+
+	if (g_set_user_kill[victim])
+	{
+		g_set_user_kill[victim] = false
+		return
+	}
+
+	if (!attacker && ((get_gametime() - g_spawn_time[victim]) <= 3.0))
+	{
+		if (cs_get_user_team(victim) == CS_TEAM_T)
+			set_task(1.0, "zombie_respawner", victim+TASK_RESPAWN)
+		else if (cs_get_user_team(victim) == CS_TEAM_CT)
+			set_task(1.0, "survivor_respawner", victim+TASK_RESPAWN)
+		return
+	}
+
+	if (attacker)
+	{
+		if (cs_get_user_team(victim) == CS_TEAM_T)
+			g_will_respawn_time[victim] = get_pcvar_float(cvar_zombie_respawn_delay)
+		else if (cs_get_user_team(victim) == CS_TEAM_CT)
+			g_will_respawn_time[victim] = get_pcvar_float(cvar_survivor_respawn_delay)
+
+		set_task(1.0, "you_will_respawn_ch", victim)
+	}
+
+	// ✅ 修正：伺服器只有一位人類時也能重生
 	if (cs_get_user_team(victim) == CS_TEAM_CT && get_pcvar_num(cvar_survivor_respawn))
 	{
-		new survivor_max_respawns = get_pcvar_num(cvar_survivor_respawns)
-
-		if (!survivor_max_respawns || g_survivor_respawn_count[victim] < survivor_max_respawns)
+		new total_ct = 0
+		for (new i = 1; i <= g_maxplayers; i++)
 		{
-			new alive_ct = 0
-			for (new i = 1; i <= g_maxplayers; i++)
-			{
-				if (is_user_connected(i) && is_user_alive(i) && cs_get_user_team(i) == CS_TEAM_CT && i != victim)
-					alive_ct++
-			}
+			if (!is_user_connected(i)) continue
+			if (cs_get_user_team(i) == CS_TEAM_CT)
+				total_ct++
+		}
 
-			if (alive_ct == 0)
+		if (total_ct == 1)
+		{
+			if (g_survivor_respawn_count[victim] > 0 && !task_exists(victim+TASK_RESPAWN))
 			{
-				g_set_user_kill[victim] = true
-				set_task(0.1, "emergency_respawn", victim)
+				set_task(get_pcvar_float(cvar_survivor_respawn_delay), "survivor_respawner", victim+TASK_RESPAWN)
 
 				static name[32]
 				get_user_name(victim, name, charsmax(name))
 				set_hudmessage(0, 255, 100, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1)
 				ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_SURVIVOR_RESPAWN", name)
+
+				emit_sound(victim, CHAN_ITEM, SOUND_PICK_ARMOR, VOL_NORM, ATTN_NORM, 0, PITCH_NORM)
 			}
-		}
-	}
-}
-// 緊急重生函數，用於防止遊戲提前結束
-public emergency_respawn(id)
-{
-	log_amx("[ZH EMER] emergency_respawn called for id=%d, connected=%d, alive=%d, g_survivor_respawn_count=%d",
-       id, is_user_connected(id), is_user_alive(id), g_survivor_respawn_count[id]);
-	if (!is_user_connected(id))
-		return;
-
-	// ✅ 清除重生旗標，讓回合可以正常結束
-	g_set_user_kill[id] = false;
-
-	// 檢查是否還有重生次數
-	new survivor_max_respawns = get_pcvar_num(cvar_survivor_respawns);
-	if (survivor_max_respawns >= 1 && g_survivor_respawn_count[id] >= survivor_max_respawns)
-		return;
-
-	// 檢查重生功能是否開啟
-	if (!get_pcvar_num(cvar_survivor_respawn))
-		return;
-
-	// 增加重生次數計數
-	g_survivor_respawn_count[id]++;
-
-	// 執行重生
-	set_msg_block(get_user_msgid("ClCorpse"), BLOCK_SET);
-
-	// 保存當前位置
-	pev(id, pev_origin, g_vec_last_origin[id]);
-	engfunc(EngFunc_SetOrigin, id, g_vec_last_origin[id]);
-
-	// 重生玩家
-	ExecuteHamB(Ham_CS_RoundRespawn, id);
-
-	// 設置重生保護
-	if (get_pcvar_float(cvar_survivor_protect) > 0.0)
-	{
-		static ctr, ctg, ctb;
-		ctr = get_pcvar_num(cvar_render_ctr);
-		ctg = get_pcvar_num(cvar_render_ctg);
-		ctb = get_pcvar_num(cvar_render_ctb);
-
-		fm_set_user_godmode(id, 1);
-		fm_set_rendering(id, kRenderFxGlowShell, ctr, ctg, ctb, kRenderNormal, 0);
-	}
-
-	// 給予武器
-	if ((!is_user_bot(id) && get_pcvar_num(cvar_survivor_giveweap) >= 1) || (is_user_bot(id) && get_pcvar_num(cvar_bot_giveweap) >= 1))
-	{
-		fm_strip_user_weapons(id);
-		fm_give_item(id, "weapon_knife");
-
-		new gun_sets_index = random_num(0, GUN_SETS_NUM - 1);
-		new weapon_id = get_weaponid(GIVE_GUN_1[gun_sets_index]);
-		new weapon_id2 = get_weaponid(GIVE_GUN_2[gun_sets_index]);
-
-		if (((!is_user_bot(id) && (get_pcvar_num(cvar_survivor_giveweap) == 1 || get_pcvar_num(cvar_survivor_giveweap) == 3)) ||
-		     (is_user_bot(id) && (get_pcvar_num(cvar_bot_giveweap) == 1 || get_pcvar_num(cvar_bot_giveweap) == 3))) &&
-		    ((1 << weapon_id) & PRIMARY_WEAPONS_BIT_SUM))
-		{
-			fm_give_item(id, GIVE_GUN_1[gun_sets_index]);
-			cs_set_user_bpammo(id, weapon_id, MAX_BPAMMO[weapon_id]);
-		}
-
-		if (((!is_user_bot(id) && (get_pcvar_num(cvar_survivor_giveweap) == 2 || get_pcvar_num(cvar_survivor_giveweap) == 3)) ||
-		     (is_user_bot(id) && (get_pcvar_num(cvar_bot_giveweap) == 2 || get_pcvar_num(cvar_bot_giveweap) == 3))) &&
-		    ((1 << weapon_id2) & SECONDARY_WEAPONS_BIT_SUM))
-		{
-			fm_give_item(id, GIVE_GUN_2[gun_sets_index]);
-			cs_set_user_bpammo(id, weapon_id2, MAX_BPAMMO[weapon_id]);
-		}
-	}
-	else
-	{
-		fm_strip_user_weapons(id);
-		fm_give_item(id, "weapon_knife");
-		fm_give_item(id, "weapon_usp");
-	}
-
-	// 移除保護
-	set_task(get_pcvar_float(cvar_survivor_protect), "remove_survivor_protection", id);
-
-	// HUD 提示
-	client_print(id, print_center, "%L", LANG_PLAYER, "ZH_EMERGENCY_RESPAWN");
-}
-public fw_PlayerKilled_Post(victim, attacker, shouldgib)
-{
-	// 保存當前位置，供後續 survivor_respawner 使用
-    pev(victim, pev_origin, g_vec_last_origin[victim]);
-    fm_set_rendering(victim)
-    if (!g_boss[victim])
-    {
-        set_pev(victim, pev_effects, pev(victim, pev_effects) | EF_NODRAW)
-    }
-
-    remove_task(victim)
-    remove_task(victim+TASK_MODEL)
-    remove_task(victim+TASK_TEAM)
-    remove_task(victim+TASK_RESPAWN)
-    remove_task(victim+TASK_BURN)
-    remove_task(victim+TASK_UNFROZEN)
-    remove_task(victim+TASK_NVG)
-    remove_task(victim+TASK_SPEC_NVG)
-
-    g_frozen[victim] = false
-    g_burning[victim] = false
-    toggle_user_nvg(victim, 0)
-    g_nvg_enabled[victim] = false
-
-    if (g_give_nvg[victim])
-    {
-        cs_set_user_nvg(victim, 0)
-        g_give_nvg[victim] = false
-    }
-
-    set_task(0.1, "spectator_nvg", victim+TASK_SPEC_NVG)
-
-    if ((cs_get_user_team(victim) == CS_TEAM_T) && !is_user_bot(victim))
-    {
-        g_zombie_respawn_count[victim] = 0
-        g_survivor_respawn_count[victim] = 0
-        cs_set_user_team(victim, CS_TEAM_CT)
-    }
-
-    if (g_set_user_kill[victim])
-    {
-        g_set_user_kill[victim] = false
-        return
-    }
-
-    if (!attacker && ((get_gametime() - g_spawn_time[victim]) <= 3.0))
-    {
-        if (cs_get_user_team(victim) == CS_TEAM_T)
-            set_task(1.0, "zombie_respawner", victim+TASK_RESPAWN)
-        else if (cs_get_user_team(victim) == CS_TEAM_CT)
-            set_task(1.0, "survivor_respawner", victim+TASK_RESPAWN)
-        return
-    }
-
-    if (attacker)
-    {
-        if (cs_get_user_team(victim) == CS_TEAM_T)
-            g_will_respawn_time[victim] = get_pcvar_float(cvar_zombie_respawn_delay)
-        else if (cs_get_user_team(victim) == CS_TEAM_CT)
-            g_will_respawn_time[victim] = get_pcvar_float(cvar_survivor_respawn_delay)
-
-        set_task(1.0, "you_will_respawn_ch", victim)
-    }
-
-    // ✅ 修正：即使只有一名CT也能安排重生，不依賴延遲判斷
-	// if (cs_get_user_team(victim) == CS_TEAM_CT && !g_set_user_kill[victim]) { ... }
-	if (cs_get_user_team(victim) == CS_TEAM_CT && !g_set_user_kill[victim])
-	{
-		new survivor_max_respawns = get_pcvar_num(cvar_survivor_respawns)
-		if (!survivor_max_respawns || g_survivor_respawn_count[victim] < survivor_max_respawns)
-		{
-			if (!task_exists(victim + TASK_RESPAWN))
+			else
 			{
-				// --- 新增：在安排延遲重生前先標記為「要重生」，
-				//     以防回合結束判斷把回合直接結束掉 ---
-				g_set_user_kill[victim] = true;
-
-				g_only_one_survivor = true
-
-				static name[32]
-				get_user_name(victim, name, charsmax(name))
-				set_hudmessage(0, 255, 100, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1)
-				...
-				set_task(get_pcvar_float(cvar_survivor_respawn_delay), "survivor_respawner", victim + TASK_RESPAWN)
+				set_hudmessage(255, 50, 50, -1.0, 0.30, 0, 6.0, 6.0, 0.1, 0.2, -1)
+				ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_SURVIVOR_DEAD")
+				// set_task(3.0, "end_round") // 可選：結束回合
 			}
 		}
-		return;
 	}
-    }
 }
-
-
 public you_will_respawn_ch(id)
 {
-    if (!is_user_connected(id))
-    {
-        return;
-    }
+	if (!is_user_connected(id))
+	{
+		return;
+	}
 
-    new survivor_max_respawns = get_pcvar_num(cvar_survivor_respawns)
+	new survivor_max_respawns = get_pcvar_num(cvar_survivor_respawns)
+	if (((cs_get_user_team(id) == CS_TEAM_T) && (g_zombie_respawns >= 1) && (g_zombie_respawn_count[id] >= g_zombie_respawns)) || ((cs_get_user_team(id) == CS_TEAM_CT) && (survivor_max_respawns >= 1) && (g_survivor_respawn_count[id] >= survivor_max_respawns)))
+	{
+		return;
+	}
 
-    // 檢查重生次數限制
-    if (((cs_get_user_team(id) == CS_TEAM_T) && (g_zombie_respawns >= 1) && (g_zombie_respawn_count[id] >= g_zombie_respawns)) || 
-        ((cs_get_user_team(id) == CS_TEAM_CT) && (survivor_max_respawns >= 1) && (g_survivor_respawn_count[id] >= survivor_max_respawns)))
-    {
-        // 重生次數用完，顯示訊息並返回
-        if (cs_get_user_team(id) == CS_TEAM_CT)
-        {
-            client_print(id, print_center, "%L", LANG_PLAYER, "ZH_NO_RESPAWN")
-        }
-        return;
-    }
+	if (g_roundend && g_will_respawn_time[id] <= 0.0)
+	{
+		client_print(id, print_center, " ")
+		return;
+	}
+	if (!task_exists(id))
+		set_task(1.0, "you_will_respawn_ch", id)
 
-    if(g_roundend)
-    {
-        client_print(id, print_center, " ")
-        return;
-    }
+	if (g_will_respawn_time[id] <= 0.9)
+	{
+		client_print(id, print_center," ")
+		if (cs_get_user_team(id) == CS_TEAM_T)
+		{
+			if (g_zombie_respawn_count[id] < g_zombie_respawns)
+			{
+				g_zombie_respawn_count[id]++
+				set_task(0.1, "zombie_respawner", id+TASK_RESPAWN)
+			}
+		}
+		else if (cs_get_user_team(id) == CS_TEAM_CT)
+		{
+			if (get_pcvar_num(cvar_survivor_respawn))
+			{
+				new survivor_max_respawns = get_pcvar_num(cvar_survivor_respawns)
+				if (!survivor_max_respawns || (g_survivor_respawn_count[id] < survivor_max_respawns))
+				{
+					g_survivor_respawn_count[id]++
+					set_task(0.1, "survivor_respawner", id+TASK_RESPAWN)
+				}
+			}
+		}
+		return;
+	}
 
-    if (g_will_respawn_time[id] <= 0.9)
-    {
-        client_print(id, print_center," ")
-        
-        if (cs_get_user_team(id) == CS_TEAM_T)
-        {
-            if (g_zombie_respawn_count[id] < g_zombie_respawns)
-            {
-                g_zombie_respawn_count[id]++
-                set_task(0.1, "zombie_respawner", id+TASK_RESPAWN)
-            }
-        }
-        else if (cs_get_user_team(id) == CS_TEAM_CT)
-        {
-            if (get_pcvar_num(cvar_survivor_respawn))
-            {
-                new survivor_max_respawns = get_pcvar_num(cvar_survivor_respawns)
-                if (!survivor_max_respawns || (g_survivor_respawn_count[id] < survivor_max_respawns))
-                {
-                    g_survivor_respawn_count[id]++
-                    set_task(0.1, "survivor_respawner", id+TASK_RESPAWN)
-                }
-            }
-        }
-        return;
-    }
-
-    if (g_will_respawn_time[id] > 0)
-    {
-        client_print(id, print_center, "%L", LANG_PLAYER, "ZH_RESPAWN", g_will_respawn_time[id])
-        g_will_respawn_time[id] -= 1.0
-    }
-
-    set_task(1.0, "you_will_respawn_ch", id)
+	if (g_will_respawn_time[id] > 0)
+	{
+		client_print(id, print_center, "%L", LANG_PLAYER, "ZH_RESPAWN", g_will_respawn_time[id])
+		g_will_respawn_time[id] -= 1.0
+	}
+	set_task(1.0, "you_will_respawn_ch", id)
 }
 
 set_boss_model(id)
@@ -2597,84 +2600,56 @@ public zombie_respawner(taskid)
 
 public survivor_respawner(taskid)
 {
-    if (g_roundend)
-        return;
+	if (g_roundend)
+		return;
 
-    set_msg_block(get_user_msgid("ClCorpse"), BLOCK_SET)
-    new id = taskid - TASK_RESPAWN
+	set_msg_block(get_user_msgid("ClCorpse"), BLOCK_SET)
+	new id = taskid-TASK_RESPAWN
+	pev(id, pev_origin, g_vec_last_origin[id])
+	engfunc(EngFunc_SetOrigin, id, g_vec_last_origin[id])
+	ExecuteHamB(Ham_CS_RoundRespawn, id)
+	if (get_pcvar_float(cvar_survivor_protect) > 0.0)
+	{
+		static ctr ,ctg, ctb
+		ctr = get_pcvar_num(cvar_render_ctr)
+		ctg = get_pcvar_num(cvar_render_ctg)
+		ctb = get_pcvar_num(cvar_render_ctb)
+		if (cs_get_user_team(id) == CS_TEAM_CT)
+		{
+			fm_set_user_godmode(id, 1)
+			fm_set_rendering(id, kRenderFxGlowShell, ctr, ctg, ctb, kRenderNormal, 0)
+		}
+	}
 
-    // 先檢查是否有合理的 last_origin（避免 {0,0,0}）
-    if (g_vec_last_origin[id][0] > -0.01 && g_vec_last_origin[id][0] < 0.01
-        && g_vec_last_origin[id][1] > -0.01 && g_vec_last_origin[id][1] < 0.01
-        && g_vec_last_origin[id][2] > -0.01 && g_vec_last_origin[id][2] < 0.01)
-    {
-        log_amx("[ZH SRV] No last_origin for id=%d, trying fallback RoundRespawn", id);
+	if ((!is_user_bot(id) && (get_pcvar_num(cvar_survivor_giveweap) >= 1)) || (is_user_bot(id) && (get_pcvar_num(cvar_bot_giveweap) >= 1)))
+	{
+		fm_strip_user_weapons(id)
+		fm_give_item(id, "weapon_knife")
+		new pri_weapons[18], pri_weapon_num, sec_weapons[6], sec_weapon_num
+		get_user_has_weapons(id, pri_weapons, pri_weapon_num, sec_weapons, sec_weapon_num)
+		new gun_sets_index, weapon_id, weapon_id2
+		gun_sets_index = random_num(0, (GUN_SETS_NUM - 1))
+		weapon_id = get_weaponid(GIVE_GUN_1[gun_sets_index])
+		weapon_id2 = get_weaponid(GIVE_GUN_2[gun_sets_index])
+		if (((!is_user_bot(id) && ((get_pcvar_num(cvar_survivor_giveweap) == 1) || (get_pcvar_num(cvar_survivor_giveweap) == 3))) || (is_user_bot(id) && ((get_pcvar_num(cvar_bot_giveweap) == 1) || (get_pcvar_num(cvar_bot_giveweap) == 3)))) && ((1<<weapon_id) & PRIMARY_WEAPONS_BIT_SUM))
+		{
+			fm_give_item(id, GIVE_GUN_1[gun_sets_index])
+			cs_set_user_bpammo(id, weapon_id, MAX_BPAMMO[weapon_id])
+		}
 
-        // 1) 嘗試用 engine/CS RoundRespawn（ham），很多情況下伺服器會處理正確出生點
-        ExecuteHamB(Ham_CS_RoundRespawn, id)
-
-        // 2) 若仍未成功，在短延遲後檢查並嘗試使用 g_spawn_vec（CSDM spawn points）作為備援
-        set_task(0.1, "check_survivor_spawned", id)
-        return
-    }
-
-    // 若有合理 last_origin，照原本流程重生
-    pev(id, pev_origin, g_vec_last_origin[id])
-    engfunc(EngFunc_SetOrigin, id, g_vec_last_origin[id])
-    ExecuteHamB(Ham_CS_RoundRespawn, id)
-
-    // 原本之後的保護、給武器、HUD 等（保留你現有的邏輯）
-    if (get_pcvar_float(cvar_survivor_protect) > 0.0)
-    {
-        static ctr, ctg, ctb;
-        ctr = get_pcvar_num(cvar_render_ctr);
-        ctg = get_pcvar_num(cvar_render_ctg);
-        ctb = get_pcvar_num(cvar_render_ctb);
-
-        fm_set_user_godmode(id, 1);
-        fm_set_rendering(id, kRenderFxGlowShell, ctr, ctg, ctb, kRenderNormal, 0);
-    }
-
-    set_task((get_pcvar_float(cvar_survivor_protect)), "remove_survivor_protection", id)
-}
-
-
-public check_survivor_spawned(id)
-{
-    if (!is_user_connected(id)) return;
-    if (is_user_alive(id)) return; // 成功了
-
-    log_amx("[ZH FALLBACK] id=%d still not alive after RoundRespawn, trying g_spawn_vec fallback", id);
-
-    // 嘗試用地圖的 spawn 列表（g_spawn_vec）做備援
-    if (g_total_spawn > 0)
-    {
-        new idx = random_num(0, g_total_spawn - 1);
-        engfunc(EngFunc_SetOrigin, id, g_spawn_vec[idx]);
-        ExecuteHamB(Ham_CS_RoundRespawn, id);
-        log_amx("[ZH FALLBACK] id=%d tried spawn idx=%d pos={%f,%f,%f}", id, idx, g_spawn_vec[idx][0], g_spawn_vec[idx][1], g_spawn_vec[idx][2]);
-    }
-    else
-    {
-        // 沒有 map spawn，直接再嘗試一次原生 RoundRespawn
-        ExecuteHamB(Ham_CS_RoundRespawn, id);
-    }
-
-    // 再短延遲檢查最終結果
-    set_task(0.1, "check_survivor_spawned_final", id);
-}
-
-public check_survivor_spawned_final(id)
-{
-    if (!is_user_connected(id)) return;
-    if (is_user_alive(id)) 
-    {
-        log_amx("[ZH FALLBACK] id=%d spawned successfully on final check", id);
-        return;
-    }
-
-    // 如果真的沒法 spawn，可以記一個 log，並讓其他結束邏輯處理（或依需求再增加重試）
-    log_amx("[ZH FALLBACK] id=%d FAILED to spawn after fallback attempts", id);
+		if (((!is_user_bot(id) && ((get_pcvar_num(cvar_survivor_giveweap) == 2) || (get_pcvar_num(cvar_survivor_giveweap) == 3))) || (is_user_bot(id) && ((get_pcvar_num(cvar_bot_giveweap) == 2) || (get_pcvar_num(cvar_bot_giveweap) == 3)))) && ((1<<weapon_id2) & SECONDARY_WEAPONS_BIT_SUM))
+		{
+			fm_give_item(id, GIVE_GUN_2[gun_sets_index])
+			cs_set_user_bpammo(id, weapon_id2, MAX_BPAMMO[weapon_id])
+		}
+	}
+	else
+	{
+		fm_strip_user_weapons(id)
+		fm_give_item(id, "weapon_knife")
+		fm_give_item(id, "weapon_usp")
+	}
+	set_task((get_pcvar_float(cvar_survivor_protect)), "remove_survivor_protection", id)
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -4603,75 +4578,85 @@ public message_TextMsg()
 // Log Event Round End
 public logevent_round_end()
 {
-    // ✅ 防止回合結束：只要有 CT 設定了即將重生，就不要結束
-    for (new i = 1; i <= g_maxplayers; i++)
-    {
-        if (is_user_connected(i) && g_set_user_kill[i])
-        {
-            // 阻止回合結束，等待重生完成
-            return;
-        }
-    }
+	if (g_game_restart)
+		return;
 
-    if (g_game_restart)
-        return;
+	// 檢查是否有 CT 正在排程重生
+	if (is_ct_pending_respawn())
+		return;
 
-    g_roundend = true;
+	g_roundend = true;
 
-    // Prevent this from getting called twice when restarting (bugfix)
-    static Float:lastendtime, Float:current_time;
-    current_time = get_gametime();
-    if (current_time - lastendtime < 0.5) return;
-    lastendtime = current_time;
+	// Prevent this from getting called twice when restarting (bugfix)
+	static Float:lastendtime, Float:current_time;
+	current_time = get_gametime();
+	if (current_time - lastendtime < 0.5) return;
+	lastendtime = current_time;
 
-    static ts[32], ts_num, cts[32], cts_num;
-    get_alive_players(ts, ts_num, cts, cts_num);
+	static ts[32], ts_num, cts[32], cts_num;
+	get_alive_players(ts, ts_num, cts, cts_num);
 
-    if (ts_num > 0) // 回合結束時,只有殭屍的陣營有生還者
-    {
-        set_hudmessage(255, 0, 0, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
-        ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZWIN");
-        StopSound(0);
-        remove_task(TASK_AMBIENCE_SOUND);
-        remove_task(TASK_BOSS_AMBIENCE_SOUND);
-        PlaySound(0, SOUND_ZOMBIE_WIN);
-        set_level(0);
-    }
-    else if (cts_num > 0) // 回合結束時,只有人類的陣營有生還者
-    {
-        set_hudmessage(0, 0, 255, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
-        ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HWIN");
-        StopSound(0);
-        remove_task(TASK_AMBIENCE_SOUND);
-        remove_task(TASK_BOSS_AMBIENCE_SOUND);
-        PlaySound(0, SOUND_SURVIVOR_WIN);
-        set_level(1);
-    }
-    else // 回合結束時雙方不分勝負
-    {
-        if ((ts_num > 0) && (cts_num > 0))
-        {
-            set_hudmessage(150, 255, 150, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
-            ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_DRAW");
-            StopSound(0);
-            remove_task(TASK_AMBIENCE_SOUND);
-            remove_task(TASK_BOSS_AMBIENCE_SOUND);
-            PlaySound(0, SOUND_DRAW);
-            set_level(0);
-        }
-        else if ((ts_num <= 0) && (cts_num <= 0))
-        {
-            set_hudmessage(100, 255, 100, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
-            ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ALLDEAD");
-            StopSound(0);
-            remove_task(TASK_AMBIENCE_SOUND);
-            remove_task(TASK_BOSS_AMBIENCE_SOUND);
-            PlaySound(0, SOUND_DRAW);
-            set_level(0);
-        }
-    }
+	if (ts_num > 0) // 回合結束時,只有殭屍的陣營有生還者
+	{
+		set_hudmessage(255, 0, 0, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
+		ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZWIN");
+		StopSound(0);
+		remove_task(TASK_AMBIENCE_SOUND);
+		remove_task(TASK_BOSS_AMBIENCE_SOUND);
+		PlaySound(0, SOUND_ZOMBIE_WIN);
+		set_level(0);
+	}
+	else if (cts_num > 0) // 回合結束時,只有人類的陣營有生還者
+	{
+		set_hudmessage(0, 0, 255, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
+		ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HWIN");
+		StopSound(0);
+		remove_task(TASK_AMBIENCE_SOUND);
+		remove_task(TASK_BOSS_AMBIENCE_SOUND);
+		PlaySound(0, SOUND_SURVIVOR_WIN);
+		set_level(1);
+	}
+	else // 回合結束時雙方不分勝負
+	{
+		if ((ts_num > 0) && (cts_num > 0))
+		{
+			set_hudmessage(150, 255, 150, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
+			ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_DRAW");
+			StopSound(0);
+			remove_task(TASK_AMBIENCE_SOUND);
+			remove_task(TASK_BOSS_AMBIENCE_SOUND);
+			PlaySound(0, SOUND_DRAW);
+			set_level(0);
+		}
+		else
+		{
+			if ((ts_num <= 0) && (cts_num <= 0))
+			{
+				set_hudmessage(100, 255, 100, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
+				ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ALLDEAD");
+				StopSound(0);
+				remove_task(TASK_AMBIENCE_SOUND);
+				remove_task(TASK_BOSS_AMBIENCE_SOUND);
+				PlaySound(0, SOUND_DRAW);
+				set_level(0);
+			}
+		}
+	}
 }
 
+// 🔧 新增：判斷是否有 CT 正在排程重生
+bool:is_ct_pending_respawn()
+{
+	for (new i = 1; i <= g_maxplayers; i++)
+	{
+		if (is_user_connected(i) && !is_user_alive(i) && cs_get_user_team(i) == CS_TEAM_CT)
+		{
+			if (g_will_respawn_time[i] > 0.0)
+				return true;
+		}
+	}
+	return false;
+}
 get_alive_players(ts[32], &ts_num, cts[32], &cts_num)
 {
 	new i, CsTeams:team
