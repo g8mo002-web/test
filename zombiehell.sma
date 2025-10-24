@@ -2222,6 +2222,8 @@ public fw_PlayerKilled(victim, attacker, shouldgib)
 // 緊急重生函數，用於防止遊戲提前結束
 public emergency_respawn(id)
 {
+	log_amx("[ZH EMER] emergency_respawn called for id=%d, connected=%d, alive=%d, g_survivor_respawn_count=%d",
+       id, is_user_connected(id), is_user_alive(id), g_survivor_respawn_count[id]);
 	if (!is_user_connected(id))
 		return;
 
@@ -2303,6 +2305,8 @@ public emergency_respawn(id)
 }
 public fw_PlayerKilled_Post(victim, attacker, shouldgib)
 {
+	// 保存當前位置，供後續 survivor_respawner 使用
+    pev(victim, pev_origin, g_vec_last_origin[victim]);
     fm_set_rendering(victim)
     if (!g_boss[victim])
     {
@@ -2578,56 +2582,84 @@ public zombie_respawner(taskid)
 
 public survivor_respawner(taskid)
 {
-	if (g_roundend)
-		return;
+    if (g_roundend)
+        return;
 
-	set_msg_block(get_user_msgid("ClCorpse"), BLOCK_SET)
-	new id = taskid-TASK_RESPAWN
-	pev(id, pev_origin, g_vec_last_origin[id])
-	engfunc(EngFunc_SetOrigin, id, g_vec_last_origin[id])
-	ExecuteHamB(Ham_CS_RoundRespawn, id)
-	if (get_pcvar_float(cvar_survivor_protect) > 0.0)
-	{
-		static ctr ,ctg, ctb
-		ctr = get_pcvar_num(cvar_render_ctr)
-		ctg = get_pcvar_num(cvar_render_ctg)
-		ctb = get_pcvar_num(cvar_render_ctb)
-		if (cs_get_user_team(id) == CS_TEAM_CT)
-		{
-			fm_set_user_godmode(id, 1)
-			fm_set_rendering(id, kRenderFxGlowShell, ctr, ctg, ctb, kRenderNormal, 0)
-		}
-	}
+    set_msg_block(get_user_msgid("ClCorpse"), BLOCK_SET)
+    new id = taskid - TASK_RESPAWN
 
-	if ((!is_user_bot(id) && (get_pcvar_num(cvar_survivor_giveweap) >= 1)) || (is_user_bot(id) && (get_pcvar_num(cvar_bot_giveweap) >= 1)))
-	{
-		fm_strip_user_weapons(id)
-		fm_give_item(id, "weapon_knife")
-		new pri_weapons[18], pri_weapon_num, sec_weapons[6], sec_weapon_num
-		get_user_has_weapons(id, pri_weapons, pri_weapon_num, sec_weapons, sec_weapon_num)
-		new gun_sets_index, weapon_id, weapon_id2
-		gun_sets_index = random_num(0, (GUN_SETS_NUM - 1))
-		weapon_id = get_weaponid(GIVE_GUN_1[gun_sets_index])
-		weapon_id2 = get_weaponid(GIVE_GUN_2[gun_sets_index])
-		if (((!is_user_bot(id) && ((get_pcvar_num(cvar_survivor_giveweap) == 1) || (get_pcvar_num(cvar_survivor_giveweap) == 3))) || (is_user_bot(id) && ((get_pcvar_num(cvar_bot_giveweap) == 1) || (get_pcvar_num(cvar_bot_giveweap) == 3)))) && ((1<<weapon_id) & PRIMARY_WEAPONS_BIT_SUM))
-		{
-			fm_give_item(id, GIVE_GUN_1[gun_sets_index])
-			cs_set_user_bpammo(id, weapon_id, MAX_BPAMMO[weapon_id])
-		}
+    // 先檢查是否有合理的 last_origin（避免 {0,0,0}）
+    if (g_vec_last_origin[id][0] > -0.01 && g_vec_last_origin[id][0] < 0.01
+        && g_vec_last_origin[id][1] > -0.01 && g_vec_last_origin[id][1] < 0.01
+        && g_vec_last_origin[id][2] > -0.01 && g_vec_last_origin[id][2] < 0.01)
+    {
+        log_amx("[ZH SRV] No last_origin for id=%d, trying fallback RoundRespawn", id);
 
-		if (((!is_user_bot(id) && ((get_pcvar_num(cvar_survivor_giveweap) == 2) || (get_pcvar_num(cvar_survivor_giveweap) == 3))) || (is_user_bot(id) && ((get_pcvar_num(cvar_bot_giveweap) == 2) || (get_pcvar_num(cvar_bot_giveweap) == 3)))) && ((1<<weapon_id2) & SECONDARY_WEAPONS_BIT_SUM))
-		{
-			fm_give_item(id, GIVE_GUN_2[gun_sets_index])
-			cs_set_user_bpammo(id, weapon_id2, MAX_BPAMMO[weapon_id])
-		}
-	}
-	else
-	{
-		fm_strip_user_weapons(id)
-		fm_give_item(id, "weapon_knife")
-		fm_give_item(id, "weapon_usp")
-	}
-	set_task((get_pcvar_float(cvar_survivor_protect)), "remove_survivor_protection", id)
+        // 1) 嘗試用 engine/CS RoundRespawn（ham），很多情況下伺服器會處理正確出生點
+        ExecuteHamB(Ham_CS_RoundRespawn, id)
+
+        // 2) 若仍未成功，在短延遲後檢查並嘗試使用 g_spawn_vec（CSDM spawn points）作為備援
+        set_task(0.1, "check_survivor_spawned", id)
+        return
+    }
+
+    // 若有合理 last_origin，照原本流程重生
+    pev(id, pev_origin, g_vec_last_origin[id])
+    engfunc(EngFunc_SetOrigin, id, g_vec_last_origin[id])
+    ExecuteHamB(Ham_CS_RoundRespawn, id)
+
+    // 原本之後的保護、給武器、HUD 等（保留你現有的邏輯）
+    if (get_pcvar_float(cvar_survivor_protect) > 0.0)
+    {
+        static ctr, ctg, ctb;
+        ctr = get_pcvar_num(cvar_render_ctr);
+        ctg = get_pcvar_num(cvar_render_ctg);
+        ctb = get_pcvar_num(cvar_render_ctb);
+
+        fm_set_user_godmode(id, 1);
+        fm_set_rendering(id, kRenderFxGlowShell, ctr, ctg, ctb, kRenderNormal, 0);
+    }
+
+    set_task((get_pcvar_float(cvar_survivor_protect)), "remove_survivor_protection", id)
+}
+
+
+public check_survivor_spawned(id)
+{
+    if (!is_user_connected(id)) return;
+    if (is_user_alive(id)) return; // 成功了
+
+    log_amx("[ZH FALLBACK] id=%d still not alive after RoundRespawn, trying g_spawn_vec fallback", id);
+
+    // 嘗試用地圖的 spawn 列表（g_spawn_vec）做備援
+    if (g_total_spawn > 0)
+    {
+        new idx = random_num(0, g_total_spawn - 1);
+        engfunc(EngFunc_SetOrigin, id, g_spawn_vec[idx]);
+        ExecuteHamB(Ham_CS_RoundRespawn, id);
+        log_amx("[ZH FALLBACK] id=%d tried spawn idx=%d pos={%f,%f,%f}", id, idx, g_spawn_vec[idx][0], g_spawn_vec[idx][1], g_spawn_vec[idx][2]);
+    }
+    else
+    {
+        // 沒有 map spawn，直接再嘗試一次原生 RoundRespawn
+        ExecuteHamB(Ham_CS_RoundRespawn, id);
+    }
+
+    // 再短延遲檢查最終結果
+    set_task(0.1, "check_survivor_spawned_final", id);
+}
+
+public check_survivor_spawned_final(id)
+{
+    if (!is_user_connected(id)) return;
+    if (is_user_alive(id)) 
+    {
+        log_amx("[ZH FALLBACK] id=%d spawned successfully on final check", id);
+        return;
+    }
+
+    // 如果真的沒法 spawn，可以記一個 log，並讓其他結束邏輯處理（或依需求再增加重試）
+    log_amx("[ZH FALLBACK] id=%d FAILED to spawn after fallback attempts", id);
 }
 
 ///////////////////////////////////////////////////////////////////
