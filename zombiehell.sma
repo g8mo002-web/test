@@ -235,7 +235,7 @@ new const SOUND_PICK_GRENADE[] = { "items/gunpickup2.wav" } 		 //取得投擲彈
 new const SOUND_PICK_AMMO[] = { "items/9mmclip1.wav" }			 //取得彈藥時的音效
 new const SOUND_PICK_ARMOR[] = { "items/ammopickup2.wav" }		 //取得護甲時的音效
 new bool:g_roundend_pending = false;
-
+//new bool:g_isRespawning[33];
 ///////////////////////////////////////////////////////////////////
 /// Give Gun Sets                                               ///
 ///////////////////////////////////////////////////////////////////
@@ -4596,6 +4596,23 @@ public message_TextMsg()
 }
 
 // Log Event Round End
+
+
+
+bool:is_ct_alive_or_respawning()
+{
+    for (new i = 1; i <= g_maxplayers; i++)
+    {
+        if (!is_user_connected(i) || cs_get_user_team(i) != CS_TEAM_CT)
+            continue;
+
+        if (is_user_alive(i) || task_exists(i + TASK_RESPAWN))
+            return true;
+    }
+    return false;
+}
+
+
 public check_round_end()
 {
 	g_roundend_pending = false;
@@ -4610,7 +4627,7 @@ public check_round_end()
 	static ts[32], ts_num, cts[32], cts_num;
 	get_alive_players(ts, ts_num, cts, cts_num);
 
-	if (ts_num > 0 && cts_num <= 0) // 只有殭屍存活
+	if (ts_num > 0 && !is_ct_alive_or_respawning()) // 只有殭屍存活，且沒有人類活著或正在復活
 	{
 		set_hudmessage(255, 0, 0, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
 		ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZWIN");
