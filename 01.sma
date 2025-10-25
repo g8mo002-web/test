@@ -4591,6 +4591,7 @@ public message_TextMsg()
 // Log Event Round End
 
 
+
 bool:is_ct_alive_or_respawning()
 {
     for (new i = 1; i <= g_maxplayers; i++)
@@ -4604,67 +4605,84 @@ bool:is_ct_alive_or_respawning()
     return false;
 }
 
+bool:is_zombie_alive()
+{
+    for (new i = 1; i <= g_maxplayers; i++)
+    {
+        if (!is_user_connected(i) || cs_get_user_team(i) != CS_TEAM_T)
+            continue;
+
+        if (is_user_alive(i))
+            return true;
+    }
+    return false;
+}
 
 
 
 public check_round_end()
 {
-	g_roundend_pending = false;
+    g_roundend_pending = false;
 
-	// 防止重複執行（例如 restart 時）
-	static Float:lastendtime, Float:current_time;
-	current_time = get_gametime();
-	if (current_time - lastendtime < 0.5) return;
-	lastendtime = current_time;
+    static Float:lastendtime, Float:current_time;
+    current_time = get_gametime();
+    if (current_time - lastendtime < 0.5) return;
+    lastendtime = current_time;
 
-	static ts[32], ts_num, cts[32], cts_num;
-	get_alive_players(ts, ts_num, cts, cts_num);
+    new bool:ct_alive = is_ct_alive_or_respawning();
+    new bool:zombie_alive = is_zombie_alive();
 
-	if (ts_num > 0 && !is_ct_alive_or_respawning()) // 只有殭屍存活，且沒有人類活著或正在復活
-	{
-		g_roundend = true;
-		set_hudmessage(255, 0, 0, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
-		ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZWIN");
-		StopSound(0);
-		remove_task(TASK_AMBIENCE_SOUND);
-		remove_task(TASK_BOSS_AMBIENCE_SOUND);
-		PlaySound(0, SOUND_ZOMBIE_WIN);
-		set_level(0);
-	}
-	else if (cts_num > 0 && ts_num <= 0) // 只有人類存活
-	{
-		g_roundend = true;
-		set_hudmessage(0, 0, 255, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
-		ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HWIN");
-		StopSound(0);
-		remove_task(TASK_AMBIENCE_SOUND);
-		remove_task(TASK_BOSS_AMBIENCE_SOUND);
-		PlaySound(0, SOUND_SURVIVOR_WIN);
-		set_level(1);
-	}
-	else if (ts_num > 0 && cts_num > 0) // 雙方都有存活者
-	{
-		g_roundend = true;
-		set_hudmessage(150, 255, 150, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
-		ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_DRAW");
-		StopSound(0);
-		remove_task(TASK_AMBIENCE_SOUND);
-		remove_task(TASK_BOSS_AMBIENCE_SOUND);
-		PlaySound(0, SOUND_DRAW);
-		set_level(0);
-	}
-	else // 全部死亡
-	{
-		g_roundend = true;
-		set_hudmessage(100, 255, 100, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
-		ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ALLDEAD");
-		StopSound(0);
-		remove_task(TASK_AMBIENCE_SOUND);
-		remove_task(TASK_BOSS_AMBIENCE_SOUND);
-		PlaySound(0, SOUND_DRAW);
-		set_level(0);
-	}
+    if (zombie_alive && !ct_alive)
+    {
+        g_roundend = true;
+        set_hudmessage(255, 0, 0, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
+        ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ZWIN");
+        StopSound(0);
+        remove_task(TASK_AMBIENCE_SOUND);
+        remove_task(TASK_BOSS_AMBIENCE_SOUND);
+        PlaySound(0, SOUND_ZOMBIE_WIN);
+        set_task(1.0, "DelayedLevelBack");
+    }
+    else if (ct_alive && !zombie_alive)
+    {
+        g_roundend = true;
+        set_hudmessage(0, 0, 255, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
+        ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_HWIN");
+        StopSound(0);
+        remove_task(TASK_AMBIENCE_SOUND);
+        remove_task(TASK_BOSS_AMBIENCE_SOUND);
+        PlaySound(0, SOUND_SURVIVOR_WIN);
+        set_task(1.0, "DelayedLevelUp");
+    }
+    else if (ct_alive && zombie_alive)
+    {
+        // 雙方都有 → 不結束
+    }
+    else
+    {
+        g_roundend = true;
+        set_hudmessage(100, 255, 100, -1.0, 0.17, 0, 3.0, 5.0, 0.0, 0.0, -1);
+        ShowSyncHudMsg(0, g_hudSync2, "%L", LANG_PLAYER, "ZH_ALLDEAD");
+        StopSound(0);
+        remove_task(TASK_AMBIENCE_SOUND);
+        remove_task(TASK_BOSS_AMBIENCE_SOUND);
+        PlaySound(0, SOUND_DRAW);
+        set_task(1.0, "DelayedLevelBack");
+    }
 }
+
+public DelayedLevelBack()
+{
+    set_level(0);
+}
+
+public DelayedLevelUp()
+{
+    set_level(1);
+}
+
+
+
 public logevent_round_end()
 {
 	set_task(0.1, "delayed_round_end");
